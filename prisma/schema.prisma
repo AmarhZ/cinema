@@ -1,0 +1,138 @@
+// MARR Cinema — skema Prisma (PostgreSQL / Neon)
+generator client {
+  provider   = "prisma-client-js"
+  engineType = "client" // tanpa binary query-engine: memakai driver adapter (@prisma/adapter-pg)
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Movie {
+  id          Int        @id @default(autoincrement())
+  slug        String     @unique
+  title       String
+  tagline     String?
+  synopsis    String
+  genres      String[]   @default([])
+  durationMin Int        @map("duration_min")
+  ageRating   String     @default("SU") @map("age_rating")
+  score       Decimal?   @db.Decimal(2, 1)
+  director    String?
+  cast        String[]   @default([]) @map("cast_list")
+  language    String?    @default("Indonesia")
+  subtitle    String?    @default("-")
+  releaseDate DateTime?  @map("release_date") @db.Date
+  status      String     @default("now") // now | soon | archived
+  posterUrl   String?    @map("poster_url")
+  hue         Int        @default(10)
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  showtimes   Showtime[]
+
+  @@map("movies")
+}
+
+model Cinema {
+  id         Int      @id @default(autoincrement())
+  slug       String   @unique
+  name       String
+  city       String
+  address    String
+  facilities String[] @default([])
+  tz         String   @default("Asia/Jakarta") // Asia/Jakarta (WIB) · Asia/Makassar (WITA) · Asia/Jayapura (WIT)
+  active     Boolean  @default(true)
+  studios    Studio[]
+
+  @@map("cinemas")
+}
+
+model Studio {
+  id        Int        @id @default(autoincrement())
+  cinemaId  Int        @map("cinema_id")
+  name      String
+  kind      String     @default("Regular") // Regular | Premier
+  seatRows  Int        @map("seat_rows")
+  seatCols  Int        @map("seat_cols")
+  basePrice Int        @map("base_price")
+  cinema    Cinema     @relation(fields: [cinemaId], references: [id], onDelete: Cascade)
+  showtimes Showtime[]
+
+  @@unique([cinemaId, name])
+  @@map("studios")
+}
+
+model Showtime {
+  id         Int         @id @default(autoincrement())
+  movieId    Int         @map("movie_id")
+  studioId   Int         @map("studio_id")
+  startsAt   DateTime    @map("starts_at") @db.Timestamptz(6)
+  price      Int
+  movie      Movie       @relation(fields: [movieId], references: [id], onDelete: Cascade)
+  studio     Studio      @relation(fields: [studioId], references: [id], onDelete: Cascade)
+  orders     Order[]
+  orderSeats OrderSeat[]
+
+  @@unique([studioId, startsAt])
+  @@index([movieId, startsAt])
+  @@map("showtimes")
+}
+
+model Order {
+  id           Int         @id @default(autoincrement())
+  code         String      @unique
+  showtimeId   Int         @map("showtime_id")
+  customerName String      @map("customer_name")
+  email        String
+  phone        String
+  seats        String[]
+  subtotal     Int
+  serviceFee   Int         @map("service_fee")
+  uniqueCode   Int         @map("unique_code") // kode unik 1-99 untuk mencocokkan mutasi QRIS
+  total        Int
+  status       String      @default("pending") // pending | awaiting_verification | paid | expired | cancelled | rejected
+  proof        String? // bukti transfer (data URL)
+  note         String? // catatan admin
+  expiresAt    DateTime    @map("expires_at") @db.Timestamptz(6)
+  createdAt    DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  paidAt       DateTime?   @map("paid_at") @db.Timestamptz(6)
+  showtime     Showtime    @relation(fields: [showtimeId], references: [id])
+  orderSeats   OrderSeat[]
+
+  @@index([status, expiresAt])
+  @@index([createdAt])
+  @@map("orders")
+}
+
+// Satu baris per kursi yang ditahan / terjual. Primary key mencegah double-booking.
+model OrderSeat {
+  showtimeId Int      @map("showtime_id")
+  seat       String
+  orderId    Int      @map("order_id")
+  showtime   Showtime @relation(fields: [showtimeId], references: [id], onDelete: Cascade)
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@id([showtimeId, seat])
+  @@map("order_seats")
+}
+
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("settings")
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  actor     String
+  action    String
+  entity    String
+  entityId  String?  @map("entity_id")
+  detail    String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([createdAt])
+  @@map("audit_logs")
+}
