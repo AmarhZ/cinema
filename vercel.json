@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "prisma migrate deploy",
+  "buildCommand": "node node_modules/prisma/build/index.js migrate deploy",
   "outputDirectory": "public",
   "cleanUrls": true,
   "rewrites": [
