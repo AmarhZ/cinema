@@ -1,4 +1,4 @@
-// Aplikasi Express — dipakai server lokal (server.js) dan Vercel (api/index.js)
+// Aplikasi Express tunggal — dipakai server lokal (server.js) dan Vercel (entry: app.js)
 require('dotenv').config({ quiet: true });
 const path = require('path');
 const express = require('express');
@@ -30,10 +30,9 @@ app.get('/api/cron/showtimes', wrap(async (req, res) => {
 }));
 app.get('/api/health', wrap(async (_req, res) => { await prisma.$queryRaw`SELECT 1`; res.json({ ok: true }); }));
 
-// Statis hanya untuk mode lokal; di Vercel folder public/ disajikan langsung oleh CDN
-if (!process.env.VERCEL) {
-  app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'], maxAge: '1h' }));
-}
+// Statis (situs + /admin) disajikan Express — satu aplikasi untuk lokal dan Vercel
+app.use('/admin', (_req, res, next) => { res.set({ 'X-Robots-Tag': 'noindex', 'Cache-Control': 'no-cache' }); next(); });
+app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'], maxAge: '1h' }));
 
 app.use('/api', (_req, _res, next) => next(httpErr(404, 'Endpoint tidak ditemukan')));
 app.use((err, _req, res, _next) => {

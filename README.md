@@ -8,7 +8,7 @@ public/admin/      panel admin  →  /admin
 app.js / routes/   API Express  (/api/*, /api/admin/*)
 lib/               Prisma client, pengaturan, auth, audit log, generator jadwal
 prisma/            schema.prisma, migrations/, seed.js
-api/index.js       entry serverless Vercel     ·   server.js = server lokal
+app.js              aplikasi Express (situs + API + admin)  ·  server.js = server lokal
 ```
 
 ## 1. Database (Neon)
