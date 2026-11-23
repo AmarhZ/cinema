@@ -40,6 +40,34 @@ const tzl = (tz) => TZ_LABEL[tz] || '';
 const fmtRelease = (ymd) => ymd ? fmtYmd(ymd.slice(0, 10), { day: 'numeric', month: 'long', year: 'numeric' }) : '-';
 const dur = (m) => `${Math.floor(m / 60)}j ${m % 60}m`;
 
+const REDUCE = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const sc = (v) => Number(v).toFixed(1);
+const daysTo = (ymd) => Math.ceil((new Date(String(ymd).slice(0, 10) + 'T00:00:00+07:00') - Date.now()) / 864e5);
+
+/* ---------- favorit (disimpan di perangkat) ---------- */
+const favs = () => new Set(store.get('favs', []));
+const HEART = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>';
+const favBtn = (slug, cls = 'fav') => `<button type="button" class="${cls}" data-fav="${esc(slug)}" aria-pressed="${favs().has(slug)}" aria-label="${favs().has(slug) ? 'Hapus dari favorit' : 'Simpan ke favorit'}">${HEART}${cls === 'favtxt btn ghost' ? '<span>Favorit</span>' : ''}</button>`;
+function syncFavs() {
+  const s = favs();
+  document.querySelectorAll('[data-fav]').forEach((b) => { const on = s.has(b.dataset.fav); b.setAttribute('aria-pressed', on); b.setAttribute('aria-label', on ? 'Hapus dari favorit' : 'Simpan ke favorit'); });
+  const n = document.getElementById('favCount'); if (n) { n.textContent = s.size; n.hidden = !s.size; }
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-fav]'); if (!b) return;
+  e.preventDefault(); e.stopPropagation();
+  const s = favs(), slug = b.dataset.fav;
+  s.has(slug) ? s.delete(slug) : s.add(slug);
+  store.set('favs', [...s]); syncFavs();
+  b.classList.remove('beat'); void b.offsetWidth; b.classList.add('beat');
+  document.dispatchEvent(new CustomEvent('favchange'));
+});
+async function shareMovie(m) {
+  const url = location.href.split('#')[0] + '#/film/' + m.slug, data = { title: m.title + ' · MARR Cinema', text: `Nonton ${m.title} di MARR Cinema`, url };
+  try { if (navigator.share) { await navigator.share(data); return; } } catch (e) { if (e.name === 'AbortError') return; }
+  try { await navigator.clipboard.writeText(url); toast('Tautan film disalin ✓', true); } catch { toast('Salin tautan dari bilah alamat browser.'); }
+}
+
 let posterSeq = 0;
 function poster(m, small = false) {
   const inner = m.poster_url || m.posterUrl
@@ -66,17 +94,18 @@ function genPoster(m) {
 }
 
 function movieCard(m) {
-  const soon = m.status === 'soon';
-  return `<a class="card-movie" href="#/film/${esc(m.slug)}">
+  const soon = m.status === 'soon', d = soon && m.release_date ? daysTo(m.release_date) : 0;
+  return `<article class="card-movie"><a class="card-link" href="#/film/${esc(m.slug)}">
     <div style="position:relative">${poster(m)}
       <span class="badge age" style="position:absolute;top:10px;left:10px;z-index:2">${esc(m.age_rating)}</span>
-      ${m.score ? `<span class="score">★ ${esc(m.score)}</span>` : ''}
+      ${m.score ? `<span class="score">★ ${sc(m.score)}</span>` : ''}
     </div>
     <div class="meta"><h3>${esc(m.title)}</h3>
-      <div class="sub">${soon ? `<span class="badge gold">Rilis ${esc(fmtYmd(m.release_date.slice(0, 10), { day: 'numeric', month: 'short' }))}</span>` : `<span>${esc(m.genres.join(' · '))}</span>`}</div>
-    </div></a>`;
+      <div class="sub">${soon ? `<span class="badge gold">Rilis ${esc(fmtYmd(m.release_date.slice(0, 10), { day: 'numeric', month: 'short' }))}</span>${d > 0 ? `<span class="cd">${d} hari lagi</span>` : ''}` : `<span>${esc(m.genres.join(' · '))}</span>`}</div>
+    </div></a>${favBtn(m.slug)}</article>`;
 }
 
+const SKEL_HOME = '<div class="wrap"><div class="skel" style="height:340px;margin:32px 0 18px"></div><div class="skel" style="height:420px"></div></div>';
 const loading = (t = 'Memuat…') => `<div class="loading"><div class="spin"></div>${esc(t)}</div>`;
 const errorBox = (msg, back = '#/') => `<div class="wrap"><div class="empty" style="margin:60px 0"><p>${esc(msg)}</p><p style="margin-top:14px"><a class="btn ghost sm" href="${back}">Kembali</a></p></div></div>`;
 
@@ -84,7 +113,7 @@ const errorBox = (msg, back = '#/') => `<div class="wrap"><div class="empty" sty
 let io = null;
 function reveal(root = $app) {
   if (io) io.disconnect();
-  const els = [...root.querySelectorAll('.card-movie,.step,.city-tile,.pay-banner,.cinema,.section-head')].filter((e) => !e.classList.contains('in'));
+  const els = [...root.querySelectorAll('.card-movie,.step,.city-tile,.pay-banner,.cinema,.section-head,.slider,.sl-thumbs')].filter((e) => !e.classList.contains('in'));
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
   if (!('IntersectionObserver' in window) || reduce) { els.forEach((e) => e.classList.add('in')); return; }
   io = new IntersectionObserver((entries) => entries.forEach((en) => { if (en.isIntersecting) { en.target.classList.add('in'); io.unobserve(en.target); } }), { rootMargin: '0px 0px -6% 0px', threshold: 0.05 });
@@ -112,7 +141,7 @@ async function route() {
     if (m) {
       document.title = title + (title.startsWith('MARR') ? '' : ' · MARR Cinema');
       window.scrollTo(0, 0);
-      $app.innerHTML = loading();
+      $app.innerHTML = path === '/' ? SKEL_HOME : loading();
       try { cleanup = (await fn(...m.slice(1).map(decodeURIComponent))) || null; reveal(); }
       catch (e) { $app.innerHTML = errorBox(e.message); }
       return;
@@ -128,7 +157,7 @@ async function loadBanner() {
   } catch {}
 }
 window.addEventListener('hashchange', route);
-window.addEventListener('DOMContentLoaded', () => { loadBanner(); route(); });
+window.addEventListener('DOMContentLoaded', () => { loadBanner(); syncFavs(); route(); });
 
 /* ---------- Landing ---------- */
 async function home() {
@@ -146,18 +175,18 @@ async function home() {
           <a class="btn ghost" href="#/bioskop">Cari bioskop</a>
         </div>
         <div class="hero-stats">
-          <div><b>${now.length}</b><span>film sedang tayang</span></div>
-          <div><b>${cities.reduce((a, c) => a + c.cinemas, 0)}</b><span>bioskop di ${cities.length} kota</span></div>
+          <div><b data-count="${now.length}">${now.length}</b><span>film sedang tayang</span></div>
+          <div><b data-count="${cities.reduce((a, c) => a + c.cinemas, 0)}">${cities.reduce((a, c) => a + c.cinemas, 0)}</b><span>bioskop di ${cities.length} kota</span></div>
           <div><b>QRIS</b><span>semua e-wallet &amp; m-banking</span></div>
         </div>
       </div>
-      ${feat ? `<a class="hero-poster" href="#/film/${esc(feat.slug)}" aria-label="Lihat ${esc(feat.title)}"><span class="tag">★ ${esc(feat.score)} · Pilihan minggu ini</span>${poster(feat)}</a>` : ''}
+      ${feat ? `<a class="hero-poster" href="#/film/${esc(feat.slug)}" aria-label="Lihat ${esc(feat.title)}"><span class="tag">★ ${sc(feat.score)} · Pilihan minggu ini</span>${poster(feat)}</a>` : ''}
     </div>
   </section>
 
   <section class="section"><div class="wrap">
-    <div class="section-head"><div><h2>Sedang tayang</h2><p>Jadwal tersedia 7 hari ke depan.</p></div><a class="btn ghost sm" href="#/film">Semua film →</a></div>
-    ${now.length ? `<div class="strip">${now.map(movieCard).join('')}</div>` : '<div class="empty">Belum ada film yang tayang.</div>'}
+    <div class="section-head"><div><h2>Sedang tayang</h2><p>Geser atau ketuk film untuk melihat jadwal 7 hari ke depan.</p></div><a class="btn ghost sm" href="#/film">Semua film →</a></div>
+    ${now.length ? sliderHTML(now) : '<div class="empty">Belum ada film yang tayang.</div>'}
   </div></section>
 
   <section class="section band"><div class="wrap">
@@ -183,34 +212,145 @@ async function home() {
     <div class="pay-banner"><div><h3>Bayar semudah scan.</h3><p>Dukung QRIS: GoPay, OVO, DANA, ShopeePay, LinkAja, dan seluruh aplikasi m-banking.</p></div><a class="btn" href="#/film">Pesan sekarang</a></div>
   </div></section>`;
   $app.querySelectorAll('.city-tile').forEach((b) => b.addEventListener('click', () => { store.set('city', b.dataset.city); location.hash = '#/bioskop'; }));
+  countUp($app);
+  return initSlider(now.length);
+}
+
+/* ---------- Slider film sedang tayang ---------- */
+const PLAY = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>';
+const PAUSE = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>';
+const ARROW = (d) => `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
+function slideHTML(m, i, n) {
+  const g = (m.genres || []).slice(0, 3).map((x) => `<span class="badge">${esc(x)}</span>`).join('');
+  return `<article class="sl-slide${i === 0 ? ' on' : ''}" role="group" aria-roledescription="slide" aria-label="${i + 1} dari ${n}" style="--h:${Number(m.hue ?? 10)}">
+    <div class="sl-bg" aria-hidden="true">${poster(m)}</div>
+    <div class="sl-in">
+      <div class="sl-copy">
+        <span class="eyebrow" style="--k:0">Sedang tayang</span>
+        <h3 class="sl-title" style="--k:1">${esc(m.title)}</h3>
+        ${m.tagline ? `<p class="sl-tag" style="--k:2">“${esc(m.tagline)}”</p>` : ''}
+        <div class="facts" style="--k:3"><span class="badge age">${esc(m.age_rating)}</span><span class="badge">${dur(m.duration_min)}</span>${g}${m.score ? `<span class="score">★ ${sc(m.score)}</span>` : ''}</div>
+        <div class="sl-cta" style="--k:4"><a class="btn" href="#/lokasi/${esc(m.slug)}">🎟 Beli tiket</a><a class="btn ghost" href="#/film/${esc(m.slug)}">Detail film</a>${favBtn(m.slug, 'fav lg')}</div>
+      </div>
+      <a class="sl-poster" href="#/film/${esc(m.slug)}" tabindex="-1" aria-hidden="true">${poster(m)}</a>
+    </div></article>`;
+}
+function sliderHTML(now) {
+  const n = now.length;
+  return `<section class="slider${n > 1 ? ' multi' : ''}" id="slider" tabindex="0" aria-roledescription="carousel" aria-label="Film sedang tayang">
+    <div class="sl-viewport">${now.map((m, i) => slideHTML(m, i, n)).join('')}</div>
+    ${n > 1 ? `<button class="sl-arrow prev" type="button" aria-label="Film sebelumnya">${ARROW('M15 5l-7 7 7 7')}</button><button class="sl-arrow next" type="button" aria-label="Film berikutnya">${ARROW('M9 5l7 7-7 7')}</button>
+    <div class="sl-bar"><div class="sl-dots" role="group" aria-label="Pilih slide">${now.map((m, i) => `<button class="dot${i === 0 ? ' on' : ''}" type="button" data-i="${i}" aria-label="Slide ${i + 1}: ${esc(m.title)}"><i></i></button>`).join('')}</div>
+      <div class="sl-ctl"><span class="sl-count"><b id="slc">01</b> / ${String(n).padStart(2, '0')}</span><button class="sl-play" id="slp" type="button" aria-label="Jeda slide otomatis"><span class="i-pause">${PAUSE}</span><span class="i-play">${PLAY}</span></button></div></div>` : ''}
+  </section>
+  ${n > 1 ? `<div class="sl-thumbs" id="slt" role="group" aria-label="Daftar film tayang">${now.map((m, i) => `<button class="thumb${i === 0 ? ' on' : ''}" type="button" data-i="${i}" aria-label="Tampilkan ${esc(m.title)}">${poster(m, true)}<span>${esc(m.title)}</span></button>`).join('')}</div>` : ''}`;
+}
+function initSlider(n) {
+  const root = $app.querySelector('#slider'); if (!root || n < 2) return null;
+  const slides = [...root.querySelectorAll('.sl-slide')], dots = [...root.querySelectorAll('.dot')], thumbs = [...$app.querySelectorAll('#slt .thumb')];
+  const strip = $app.querySelector('#slt'), count = root.querySelector('#slc'), playBtn = root.querySelector('#slp');
+  let cur = 0, userPaused = REDUCE, hover = false, focus = false, hidden = document.hidden, off = false;
+  const apply = () => {
+    slides.forEach((el, k) => { el.classList.toggle('on', k === cur); el.inert = k !== cur; el.setAttribute('aria-hidden', k !== cur); });
+    dots.forEach((b, k) => { b.classList.toggle('on', k === cur); b.setAttribute('aria-current', k === cur); });
+    thumbs.forEach((t, k) => t.classList.toggle('on', k === cur));
+    count.textContent = String(cur + 1).padStart(2, '0');
+    const t = thumbs[cur];
+    if (t && strip && strip.scrollWidth > strip.clientWidth) strip.scrollTo({ left: t.offsetLeft - (strip.clientWidth - t.clientWidth) / 2, behavior: REDUCE ? 'auto' : 'smooth' });
+  };
+  const go = (i, d) => {
+    i = (i + n) % n; if (i === cur) return;
+    root.style.setProperty('--dir', d ?? (i > cur ? 1 : -1));
+    cur = i; apply();
+  };
+  const state = () => {
+    root.classList.toggle('auto', !userPaused);
+    root.classList.toggle('user-paused', userPaused);
+    root.classList.toggle('is-paused', hover || focus || hidden || off);
+    playBtn.setAttribute('aria-label', userPaused ? 'Putar slide otomatis' : 'Jeda slide otomatis');
+  };
+  // autoplay digerakkan animasi CSS pada penanda progres → otomatis berhenti saat dijeda
+  root.querySelector('.sl-dots').addEventListener('animationend', (e) => { if (e.animationName === 'slFill' && e.target.parentElement.classList.contains('on')) go(cur + 1, 1); });
+  root.querySelector('.prev').addEventListener('click', () => go(cur - 1, -1));
+  root.querySelector('.next').addEventListener('click', () => go(cur + 1, 1));
+  dots.forEach((b) => b.addEventListener('click', () => go(+b.dataset.i)));
+  thumbs.forEach((b) => b.addEventListener('click', () => go(+b.dataset.i)));
+  playBtn.addEventListener('click', () => { userPaused = !userPaused; state(); });
+  root.addEventListener('keydown', (e) => { if (e.key === 'ArrowRight') { go(cur + 1, 1); e.preventDefault(); } else if (e.key === 'ArrowLeft') { go(cur - 1, -1); e.preventDefault(); } });
+  root.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') { hover = true; state(); } });
+  root.addEventListener('pointerleave', () => { hover = false; root.style.setProperty('--px', 0); root.style.setProperty('--py', 0); state(); });
+  root.addEventListener('focusin', (e) => { if (e.target.matches(':focus-visible')) { focus = true; state(); } });
+  root.addEventListener('focusout', () => { focus = false; state(); });
+  // geser (swipe) untuk layar sentuh & drag mouse
+  const vp = root.querySelector('.sl-viewport'); let sx = 0, sy = 0, dx = 0, dy = 0, drag = false, moved = false;
+  vp.addEventListener('pointerdown', (e) => { if (e.pointerType === 'mouse' && e.button !== 0) return; sx = e.clientX; sy = e.clientY; dx = dy = 0; drag = true; moved = false; });
+  vp.addEventListener('pointermove', (e) => { if (!drag) return; dx = e.clientX - sx; dy = e.clientY - sy; });
+  const endDrag = () => { if (!drag) return; drag = false; if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.2) { moved = true; go(cur + (dx < 0 ? 1 : -1), dx < 0 ? 1 : -1); } };
+  vp.addEventListener('pointerup', endDrag); vp.addEventListener('pointercancel', () => { drag = false; });
+  vp.addEventListener('click', (e) => { if (moved) { e.preventDefault(); e.stopPropagation(); moved = false; } }, true);
+  vp.addEventListener('dragstart', (e) => e.preventDefault());
+  // efek paralaks poster (mouse saja)
+  let raf = 0;
+  if (!REDUCE) root.addEventListener('pointermove', (e) => {
+    if (e.pointerType !== 'mouse' || raf) return;
+    raf = requestAnimationFrame(() => { raf = 0; const r = root.getBoundingClientRect(); root.style.setProperty('--px', ((e.clientX - r.left) / r.width - .5).toFixed(3)); root.style.setProperty('--py', ((e.clientY - r.top) / r.height - .5).toFixed(3)); });
+  });
+  const onVis = () => { hidden = document.hidden; state(); };
+  document.addEventListener('visibilitychange', onVis);
+  const io2 = 'IntersectionObserver' in window ? new IntersectionObserver(([en]) => { off = !en.isIntersecting; state(); }, { threshold: 0.25 }) : null;
+  io2?.observe(root);
+  apply(); state();
+  return () => { document.removeEventListener('visibilitychange', onVis); io2?.disconnect(); cancelAnimationFrame(raf); };
+}
+function countUp(root) {
+  if (REDUCE) return;
+  root.querySelectorAll('[data-count]').forEach((el) => {
+    const to = Number(el.dataset.count), t0 = performance.now();
+    const step = (t) => { const p = Math.min(1, (t - t0) / 900); el.textContent = Math.round(to * (1 - Math.pow(1 - p, 3))); if (p < 1 && el.isConnected) requestAnimationFrame(step); };
+    el.textContent = '0'; requestAnimationFrame(step);
+  });
 }
 
 /* ---------- Daftar film ---------- */
 async function films() {
   const all = await api('/movies?status=all');
   const genres = [...new Set(all.flatMap((m) => m.genres))].sort();
-  let tab = 'now', genre = '', q = '';
+  let tab = store.get('filmTab', 'now'), genre = '', q = '', sort = 'new';
+  store.set('filmTab', 'now'); if (!['now', 'soon', 'fav'].includes(tab)) tab = 'now';
   $app.innerHTML = `<div class="wrap">
     <div class="page-head"><h1>Film</h1><p>Temukan tontonan untukmu.</p></div>
     <div class="toolbar">
       <div class="chips" role="tablist" aria-label="Status film">
-        <button class="chip" role="tab" data-tab="now" aria-pressed="true">Sedang tayang</button>
-        <button class="chip" role="tab" data-tab="soon" aria-pressed="false">Segera tayang</button>
+        <button class="chip" role="tab" data-tab="now" aria-pressed="${tab === 'now'}">Sedang tayang</button>
+        <button class="chip" role="tab" data-tab="soon" aria-pressed="${tab === 'soon'}">Segera tayang</button>
+        <button class="chip" role="tab" data-tab="fav" aria-pressed="${tab === 'fav'}">♥ Favorit <span id="fc"></span></button>
       </div>
-      <input class="input search" type="search" placeholder="Cari judul…" aria-label="Cari judul film">
+      <div class="tools">
+        <select class="input sel" id="sort" aria-label="Urutkan film"><option value="new">Terbaru</option><option value="score">Rating tertinggi</option><option value="az">Judul A–Z</option><option value="dur">Durasi terpendek</option></select>
+        <input class="input search" type="search" placeholder="Cari judul…" aria-label="Cari judul film">
+      </div>
     </div>
-    <div class="chips" id="gen" style="margin:-8px 0 26px"><button class="chip" data-g="" aria-pressed="true">Semua genre</button>${genres.map((g) => `<button class="chip" data-g="${esc(g)}" aria-pressed="false">${esc(g)}</button>`).join('')}</div>
+    <div class="chips" id="gen" style="margin:-8px 0 20px"><button class="chip" data-g="" aria-pressed="true">Semua genre</button>${genres.map((g) => `<button class="chip" data-g="${esc(g)}" aria-pressed="false">${esc(g)}</button>`).join('')}</div>
+    <p class="muted result-count" id="cnt" aria-live="polite"></p>
     <div id="list" class="grid-movies" style="padding-bottom:64px"></div></div>`;
   const list = $app.querySelector('#list');
+  const SORTS = { new: () => 0, score: (a, b) => (b.score || 0) - (a.score || 0), az: (a, b) => a.title.localeCompare(b.title, 'id'), dur: (a, b) => a.duration_min - b.duration_min };
   const draw = () => {
-    const f = all.filter((m) => m.status === tab && (!genre || m.genres.includes(genre)) && m.title.toLowerCase().includes(q.toLowerCase()));
-    list.innerHTML = f.length ? f.map(movieCard).join('') : '<div class="empty" style="grid-column:1/-1">Tidak ada film yang cocok.</div>';
+    const fv = favs();
+    $app.querySelector('#fc').textContent = fv.size ? `(${fv.size})` : '';
+    const f = all.filter((m) => (tab === 'fav' ? fv.has(m.slug) : m.status === tab) && (!genre || m.genres.includes(genre)) && m.title.toLowerCase().includes(q.toLowerCase())).sort(SORTS[sort]);
+    $app.querySelector('#cnt').textContent = f.length ? `${f.length} film` : '';
+    list.innerHTML = f.length ? f.map(movieCard).join('') : `<div class="empty" style="grid-column:1/-1">${tab === 'fav' && !fv.size ? 'Belum ada favorit. Ketuk ikon ♥ pada poster film untuk menyimpannya di sini.' : 'Tidak ada film yang cocok.'}</div>`;
     reveal(list);
   };
   $app.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { tab = b.dataset.tab; $app.querySelectorAll('[data-tab]').forEach((x) => x.setAttribute('aria-pressed', x === b)); draw(); }));
   $app.querySelectorAll('[data-g]').forEach((b) => b.addEventListener('click', () => { genre = b.dataset.g; $app.querySelectorAll('[data-g]').forEach((x) => x.setAttribute('aria-pressed', x === b)); draw(); }));
   $app.querySelector('.search').addEventListener('input', (e) => { q = e.target.value; draw(); });
+  $app.querySelector('#sort').addEventListener('change', (e) => { sort = e.target.value; draw(); });
+  const onFav = () => { if (tab === 'fav') draw(); else $app.querySelector('#fc').textContent = favs().size ? `(${favs().size})` : ''; };
+  document.addEventListener('favchange', onFav);
   draw();
+  return () => document.removeEventListener('favchange', onFav);
 }
 
 /* ---------- Detail film ---------- */
@@ -228,10 +368,14 @@ async function movie(slug) {
         <span class="badge age">${esc(m.age_rating)}</span>
         <span class="badge">${dur(m.duration_min)}</span>
         ${m.genres.map((g) => `<span class="badge">${esc(g)}</span>`).join('')}
-        ${m.score ? `<span class="score">★ ${esc(m.score)}</span>` : ''}
+        ${m.score ? `<span class="score">★ ${sc(m.score)}</span>` : ''}
       </div>
       <p class="synopsis">${esc(m.synopsis)}</p>
-      ${now ? `<a class="btn" href="#/lokasi/${esc(m.slug)}">🎟 Beli tiket — pilih bioskop</a>` : `<span class="badge gold" style="padding:10px 16px;font-size:14px">Tiket dibuka mendekati tanggal rilis ${esc(fmtRelease(m.release_date))}</span>`}
+      <div class="actions">
+        ${now ? `<a class="btn" href="#/lokasi/${esc(m.slug)}">🎟 Beli tiket — pilih bioskop</a>` : `<span class="badge gold" style="padding:10px 16px;font-size:14px">Tiket dibuka mendekati tanggal rilis ${esc(fmtRelease(m.release_date))}</span>`}
+        ${favBtn(m.slug, 'favtxt btn ghost')}
+        <button type="button" class="btn ghost" id="share"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg>Bagikan</button>
+      </div>
       <dl class="dl">
         <dt>Sutradara</dt><dd>${esc(m.director || '-')}</dd>
         <dt>Pemeran</dt><dd>${esc((m.cast_list || []).join(', ') || '-')}</dd>
@@ -240,7 +384,16 @@ async function movie(slug) {
         <dt>Tanggal rilis</dt><dd>${esc(fmtRelease(m.release_date))}</dd>
         <dt>Durasi</dt><dd>${dur(m.duration_min)} (${m.duration_min} menit)</dd>
       </dl>
-    </div></div></section>`;
+    </div></div></section>
+    <section class="section" id="relwrap" hidden><div class="wrap"><div class="section-head"><div><h2>Film lain yang sedang tayang</h2><p>Mungkin kamu juga suka.</p></div></div><div class="strip" id="rel"></div></div></section>`;
+  $app.querySelector('#share').addEventListener('click', () => shareMovie(m));
+  api('/movies?status=now').then((list) => {
+    const box = $app.querySelector('#rel'); if (!box) return;
+    const gs = new Set(m.genres);
+    const rel = list.filter((x) => x.slug !== m.slug).sort((a, b) => b.genres.filter((g) => gs.has(g)).length - a.genres.filter((g) => gs.has(g)).length).slice(0, 8);
+    if (!rel.length) return;
+    box.innerHTML = rel.map(movieCard).join(''); $app.querySelector('#relwrap').hidden = false; reveal($app.querySelector('#relwrap'));
+  }).catch(() => {});
 }
 
 /* ---------- Pilih lokasi / bioskop & jadwal ---------- */
@@ -319,6 +472,7 @@ async function seats(id) {
       <a class="muted" href="#/lokasi/${esc(s.movie.slug)}" style="font-size:14px">← Ganti jadwal</a>
       <h2 style="margin:8px 0 2px;font-size:26px">Pilih kursi</h2>
       <p class="muted" style="margin-bottom:18px;font-size:14.5px">${esc(s.cinema.name)} · ${esc(s.studio)} · maksimal ${s.maxSeats} kursi</p>
+      <div class="quick"><label class="field"><span>Jumlah penonton</span><select class="input sel" id="qn" aria-label="Jumlah kursi">${Array.from({ length: s.maxSeats }, (_, i) => `<option value="${i + 1}">${i + 1} orang</option>`).join('')}</select></label><button type="button" class="btn ghost sm" id="qp">✨ Pilihkan kursi terbaik</button></div>
       <div class="screen">LAYAR</div>
       <div class="seatmap" style="--cols:${s.cols}"><div class="seatrows" id="rows"></div></div>
       <p class="hint-scroll">↔ Geser denah ke samping bila kursi terpotong</p>
@@ -371,6 +525,21 @@ async function seats(id) {
     else if (sel.size >= s.maxSeats) return toast(`Maksimal ${s.maxSeats} kursi per pesanan.`);
     else sel.add(k);
     render();
+  });
+  // Kursi terbaik: berdampingan, sedikit di belakang tengah studio, tanpa melewati lorong
+  $app.querySelector('#qp').addEventListener('click', () => {
+    const n = Number($app.querySelector('#qn').value) || 1, idealR = (s.rows - 1) * 0.62, mid = (s.cols + 1) / 2;
+    let best = null;
+    for (let r = 0; r < s.rows; r++) for (let c = 1; c + n - 1 <= s.cols; c++) {
+      let ok = true;
+      for (let k = 0; k < n; k++) { const cc = c + k; if (taken.has(rowsL[r] + cc) || (k && cc === aisleAt + 1)) { ok = false; break; } }
+      if (!ok) continue;
+      const score = Math.abs(r - idealR) * 2 + Math.abs(c + (n - 1) / 2 - mid);
+      if (!best || score < best.score) best = { score, list: Array.from({ length: n }, (_, k) => rowsL[r] + (c + k)) };
+    }
+    if (!best) return toast(`Tidak ada ${n} kursi berdampingan yang kosong. Coba jumlah lebih sedikit atau pilih manual.`);
+    sel.clear(); best.list.forEach((k) => sel.add(k)); render();
+    rowsEl.querySelector(`[data-s="${best.list[0]}"]`)?.scrollIntoView({ block: 'nearest', inline: 'center', behavior: REDUCE ? 'auto' : 'smooth' });
   });
   $app.querySelector('#mnext').addEventListener('click', () => { const f = $app.querySelector('#f'); f.scrollIntoView({ behavior: 'smooth', block: 'center' }); setTimeout(() => f.querySelector('input')?.focus({ preventScroll: true }), 450); });
   const form = $app.querySelector('#f'), err = $app.querySelector('#err');
@@ -526,3 +695,28 @@ function check() {
     <form id="cf"><input class="input" name="code" placeholder="Kode pesanan" maxlength="12" required value="${esc(last)}" aria-label="Kode pesanan"><button class="btn">Cari</button></form></div></div>`;
   $app.querySelector('#cf').addEventListener('submit', (e) => { e.preventDefault(); const c = new FormData(e.target).get('code').trim(); if (/^[A-Za-z0-9]{4,12}$/.test(c)) location.hash = '#/bayar/' + c.toUpperCase(); else toast('Kode tidak valid.'); });
 }
+
+
+/* ---------- efek global: progres scroll, kembali ke atas, ripple, tilt kartu, tombol favorit ---------- */
+(() => {
+  const prog = document.getElementById('prog'), top = document.getElementById('totop'); let tick = false;
+  const upd = () => { tick = false; const max = document.documentElement.scrollHeight - innerHeight; if (prog) prog.style.transform = `scaleX(${max > 0 ? Math.min(1, scrollY / max) : 0})`; top?.classList.toggle('show', scrollY > 700); };
+  addEventListener('scroll', () => { if (!tick) { tick = true; requestAnimationFrame(upd); } }, { passive: true });
+  top?.addEventListener('click', () => scrollTo({ top: 0, behavior: REDUCE ? 'auto' : 'smooth' }));
+  document.getElementById('navFav')?.addEventListener('click', (e) => { e.preventDefault(); store.set('filmTab', 'fav'); if (location.hash === '#/film') route(); else location.hash = '#/film'; });
+  if (REDUCE) return;
+  document.addEventListener('pointerdown', (e) => {
+    const b = e.target.closest('.btn'); if (!b || b.disabled) return;
+    const r = b.getBoundingClientRect(), d = Math.max(r.width, r.height) * 2, el = document.createElement('span');
+    el.className = 'rip'; el.style.cssText = `width:${d}px;height:${d}px;left:${e.clientX - r.left - d / 2}px;top:${e.clientY - r.top - d / 2}px`;
+    b.appendChild(el); el.addEventListener('animationend', () => el.remove());
+  });
+  if (matchMedia('(hover:hover) and (pointer:fine)').matches) {
+    $app.addEventListener('pointermove', (e) => {
+      const c = e.target.closest?.('.card-movie'); if (!c) return; const r = c.getBoundingClientRect();
+      c.style.setProperty('--ry', (((e.clientX - r.left) / r.width - .5) * 10).toFixed(1) + 'deg');
+      c.style.setProperty('--rx', ((.5 - (e.clientY - r.top) / r.height) * 8).toFixed(1) + 'deg');
+    });
+    $app.addEventListener('pointerout', (e) => { const c = e.target.closest?.('.card-movie'); if (c && !c.contains(e.relatedTarget)) { c.style.removeProperty('--rx'); c.style.removeProperty('--ry'); } });
+  }
+})();

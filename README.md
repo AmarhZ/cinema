@@ -5,10 +5,10 @@ Express (Node.js) · **Prisma** + PostgreSQL (**Neon**) · frontend JavaScript m
 ```
 public/            website publik (landing, film, lokasi, kursi, bayar QRIS, e-tiket)
 public/admin/      panel admin  →  /admin
-app.js / routes/   API Express  (/api/*, /api/admin/*)
+app.js             aplikasi Express tunggal (situs + /api + /admin)  ·  server.js = server lokal
+routes/            endpoint API (/api/*, /api/admin/*)
 lib/               Prisma client, pengaturan, auth, audit log, generator jadwal
 prisma/            schema.prisma, migrations/, seed.js
-app.js              aplikasi Express (situs + API + admin)  ·  server.js = server lokal
 ```
 
 ## 1. Database (Neon)
@@ -25,9 +25,9 @@ npm start                   # http://localhost:3000  ·  admin: http://localhost
 ```
 
 ## 3. Deploy ke Vercel
-1. Push folder ini ke GitHub, lalu **Add New → Project** di Vercel dan impor repo (Framework: *Other*).
+1. Push folder ini ke GitHub (isi folder `cinema` jadi root repo), lalu **Add New → Project** di Vercel dan impor repo. Biarkan **Framework Preset = Express** (terdeteksi otomatis dari `app.js`) dan **matikan semua Override** (Output Directory, Build Command, Install Command harus kosong).
 2. Isi **Environment Variables**: `DATABASE_URL`, `DIRECT_URL`, `ADMIN_PASSWORD`, `SESSION_SECRET` (`openssl rand -hex 32`), `CRON_SECRET` (`openssl rand -hex 24`).
-3. **Deploy.** Build menjalankan `prisma migrate deploy` (tabel dibuat otomatis); `vercel.json` sudah mengatur rewrite `/api/*`, `/admin`, dan Cron harian.
+3. **Deploy.** Build menjalankan `prisma migrate deploy` (tabel dibuat otomatis); `vercel.json` hanya berisi perintah build dan Cron harian. Node dikunci ke 22.x di `package.json`.
 4. Isi data awal **sekali** dari komputer Anda (dengan `.env` berisi URL Neon yang sama): `npm run db:seed`. Atau lewati seed dan input semuanya lewat `/admin`.
 5. Buka `https://domain-anda.vercel.app/admin`, masuk dengan `ADMIN_PASSWORD`.
 
